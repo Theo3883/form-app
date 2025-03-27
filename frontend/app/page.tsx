@@ -7,7 +7,7 @@ export default function Home() {
     console.log("Form submitted with data:", data)
     
     try {
-      const response = await fetch('https://backend-form-app-sigma.vercel.app/api/submit', {
+      const response = await fetch('https://backend-form-app-sigma.vercel.app//api/submit', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
