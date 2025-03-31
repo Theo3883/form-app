@@ -3,7 +3,8 @@ const cors = require('cors');
 const morgan = require('morgan');
 const fs = require('fs');
 const path = require('path');
-
+const { google } = require('googleapis');
+require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -13,14 +14,55 @@ app.use(cors());
 app.use(express.json()); // Parse JSON request body
 app.use(morgan('dev')); // HTTP request logger
 
-// Create a 'submissions' directory if it doesn't exist
-const submissionsDir = path.join(__dirname, 'submissions');
-if (!fs.existsSync(submissionsDir)) {
-  fs.mkdirSync(submissionsDir);
+const oauth2Client = new google.auth.OAuth2(
+  process.env.client_id,
+  process.env.client_secret,
+  process.env.redirect_uri
+);
+
+oauth2Client.setCredentials({ refresh_token:  process.env.refresh_token });
+
+const drive = google.drive({
+  version: 'v3',
+  auth: oauth2Client
+});
+
+
+async function uploadFile(fileName, jsonData) {
+  try {
+    // Convert JSON data to string and then to buffer
+    const jsonString = JSON.stringify(jsonData, null, 2);
+    
+    const { Readable } = require('stream');
+    const readableStream = new Readable();
+    readableStream.push(jsonString);
+    readableStream.push(null); 
+    
+    const response = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        mimeType: 'application/json'
+      },
+      media: {
+        mimeType: 'application/json',
+        body: readableStream 
+      }
+    });
+    
+    console.log('File uploaded successfully to Google Drive:', response.data);
+    return { 
+      success: true, 
+      fileId: response.data.id,
+      fileName: response.data.name 
+    };
+  } catch (error) {
+    console.error('Error uploading to Google Drive:', error.message);
+    return { success: false, message: error.message };
+  }
 }
 
-// Route to handle form submissions
-app.post('/api/submit', (req, res) => {
+// Modify the submission handler to upload directly to Google Drive
+app.post('/api/submit', async (req, res) => {
   try {
     const formData = req.body;
     
@@ -29,20 +71,20 @@ app.post('/api/submit', (req, res) => {
     const userName = formData.name ? formData.name.replace(/\s+/g, '_') : 'anonymous';
     const filename = `${timestamp}_${userName}.json`;
     
-    // Save the submission to a file
-    const filePath = path.join(submissionsDir, filename);
-    fs.writeFileSync(filePath, JSON.stringify(formData, null, 2));
+    // Upload directly to Google Drive without saving locally
+    const uploadResult = await uploadFile(filename, formData);
     
-    console.log(`Form submission saved: ${filename}`);
+    console.log(`Form submission uploaded directly to Google Drive: ${filename}`);
     
     // Send success response
     res.status(201).json({ 
       success: true, 
-      message: 'Form submission received and saved successfully',
-      filename
+      message: 'Form submission received and uploaded successfully',
+      filename,
+      driveUpload: uploadResult
     });
   } catch (error) {
-    console.error('Error saving form submission:', error);
+    console.error('Error processing form submission:', error);
     res.status(500).json({ 
       success: false, 
       message: 'An error occurred while processing your submission'
@@ -51,7 +93,7 @@ app.post('/api/submit', (req, res) => {
 });
 
 // Route to get all submissions (for admin purposes)
-app.get('/api/submissions', (req, res) => {
+/*app.get('/api/submissions', (req, res) => {
   try {
     const files = fs.readdirSync(submissionsDir);
     res.status(200).json({ 
@@ -66,10 +108,9 @@ app.get('/api/submissions', (req, res) => {
       message: 'An error occurred while retrieving submissions'
     });
   }
-});
+});*/
 
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Submissions will be saved to: ${submissionsDir}`);
 });
